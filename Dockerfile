@@ -5,6 +5,8 @@ ENV PYTHONUNBUFFERED=1 \
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends chromium chromium-driver \
+    && chromium --version \
+    && chromedriver --version \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -12,7 +14,7 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 
 COPY . .
-RUN mkdir -p /data/vstudy_chrome_profile
+RUN mkdir -p /data/vstudy_chrome_profile /tmp/chrome
 
 ENV HEADLESS=true \
     UNATTENDED=true \

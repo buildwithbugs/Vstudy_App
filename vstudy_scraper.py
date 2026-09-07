@@ -1,6 +1,7 @@
 import os
 import re
 import shutil
+import subprocess
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException, WebDriverException, StaleElementReferenceException
 from selenium.webdriver.common.by import By
@@ -32,17 +33,29 @@ class VStudyScraper:
         self.wait_timeout = 20
         print("[✓] VStudy scraper ready")
 
-    def _create_driver(self):
-        profile_dir = os.path.abspath(VSTUDY_PROFILE_DIR)
-        runtime_dir = os.path.abspath(CHROME_RUNTIME_DIR)
-        os.makedirs(profile_dir, exist_ok=True)
-        os.makedirs(runtime_dir, exist_ok=True)
+    def _log_chrome_diagnostics(self, chromium_binary, chromedriver_binary):
+        for label, binary in (
+            ("Chromium", chromium_binary),
+            ("ChromeDriver", chromedriver_binary),
+        ):
+            if not binary:
+                print(f"[DEBUG] {label} path: not found")
+                continue
+            try:
+                result = subprocess.run(
+                    [binary, "--version"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=False,
+                )
+                version = (result.stdout or result.stderr).strip()
+            except (OSError, subprocess.SubprocessError) as exc:
+                version = f"unavailable ({exc})"
+            print(f"[DEBUG] {label} path: {binary}")
+            print(f"[DEBUG] {label} version: {version}")
 
-        if not os.access(profile_dir, os.W_OK):
-            raise PermissionError(f"Chrome profile directory is not writable: {profile_dir}")
-        if not os.access(runtime_dir, os.W_OK):
-            raise PermissionError(f"Chrome runtime directory is not writable: {runtime_dir}")
-
+    def _build_chrome_options(self, profile_dir, runtime_dir, chromium_binary):
         options = Options()
         options.add_argument(f"--user-data-dir={profile_dir}")
         options.add_argument(f"--disk-cache-dir={runtime_dir}")
@@ -53,10 +66,6 @@ class VStudyScraper:
         options.add_argument("--disable-notifications")
         options.add_argument("--disable-popup-blocking")
         options.add_argument("--disable-blink-features=AutomationControlled")
-        chromium_binary = next(
-            (shutil.which(name) for name in ("chromium", "chromium-browser", "google-chrome") if shutil.which(name)),
-            None,
-        )
         if chromium_binary:
             options.binary_location = chromium_binary
         if HEADLESS:
@@ -68,12 +77,52 @@ class VStudyScraper:
             options.add_argument("--remote-debugging-port=9222")
         options.add_experimental_option("excludeSwitches", ["enable-automation"])
         options.add_experimental_option("useAutomationExtension", False)
+        return options
 
+    def _is_profile_startup_failure(self, exc):
+        message = str(exc).lower()
+        return (
+            "session not created" in message and "chrome instance exited" in message
+        ) or "user data directory is already in use" in message
+
+    def _create_driver(self):
+        profile_dir = os.path.abspath(VSTUDY_PROFILE_DIR)
+        runtime_dir = os.path.abspath(CHROME_RUNTIME_DIR)
+        os.makedirs(profile_dir, exist_ok=True)
+        os.makedirs(runtime_dir, exist_ok=True)
+
+        if not os.access(profile_dir, os.W_OK):
+            raise PermissionError(f"Chrome profile directory is not writable: {profile_dir}")
+        if not os.access(runtime_dir, os.W_OK):
+            raise PermissionError(f"Chrome runtime directory is not writable: {runtime_dir}")
+
+        chromium_binary = next(
+            (shutil.which(name) for name in ("chromium", "chromium-browser", "google-chrome") if shutil.which(name)),
+            None,
+        )
         chromedriver_binary = shutil.which("chromedriver")
-        service = Service(chromedriver_binary) if chromedriver_binary else None
-        self.driver = webdriver.Chrome(service=service, options=options)
+        self._log_chrome_diagnostics(chromium_binary, chromedriver_binary)
+        options = self._build_chrome_options(profile_dir, runtime_dir, chromium_binary)
+        active_profile_dir = profile_dir
+        try:
+            service = Service(chromedriver_binary) if chromedriver_binary else None
+            self.driver = webdriver.Chrome(service=service, options=options)
+        except WebDriverException as exc:
+            if not self._is_profile_startup_failure(exc):
+                raise
+            fallback_profile_dir = os.path.join(runtime_dir, "fallback-user-data")
+            os.makedirs(fallback_profile_dir, exist_ok=True)
+            print(f"[!] Persistent Chrome profile failed; retrying with temporary profile: {fallback_profile_dir}")
+            fallback_options = self._build_chrome_options(
+                fallback_profile_dir,
+                runtime_dir,
+                chromium_binary,
+            )
+            fallback_service = Service(chromedriver_binary) if chromedriver_binary else None
+            self.driver = webdriver.Chrome(service=fallback_service, options=fallback_options)
+            active_profile_dir = fallback_profile_dir
 
-        print(f"[*] Using persistent Chrome profile: {profile_dir}")
+        print(f"[*] Using Chrome user-data directory: {active_profile_dir}")
         return self.driver
 
     def _is_dashboard_visible(self, driver):
