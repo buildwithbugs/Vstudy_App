@@ -2,7 +2,7 @@ import os
 import re
 import shutil
 import subprocess
-import sys
+import tempfile
 import traceback
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException, WebDriverException, StaleElementReferenceException
@@ -148,9 +148,17 @@ class VStudyScraper:
         chromedriver_binary = shutil.which("chromedriver")
         self._log_chrome_diagnostics(chromium_binary, chromedriver_binary)
         options = self._build_chrome_options(profile_dir, runtime_dir, chromium_binary)
+        chromedriver_log_path = None
         try:
+            if chromedriver_binary:
+                log_fd, chromedriver_log_path = tempfile.mkstemp(
+                    prefix="chromedriver-",
+                    suffix=".log",
+                    dir=runtime_dir,
+                )
+                os.close(log_fd)
             service = (
-                Service(chromedriver_binary, log_output=sys.stderr)
+                Service(chromedriver_binary, log_output=chromedriver_log_path)
                 if chromedriver_binary
                 else None
             )
@@ -161,9 +169,24 @@ class VStudyScraper:
             print(f"[DEBUG] Chrome user-data directory: {profile_dir}")
             print(f"[DEBUG] Chrome runtime/cache directory: {runtime_dir}")
             print(f"[DEBUG] Chrome options: {options.arguments}")
+            print(f"[DEBUG] ChromeDriver exception message: {str(exc) or '<empty>'}")
             print(f"[DEBUG] Complete ChromeDriver exception: {exc!r}")
-            traceback.print_exc(file=sys.stderr)
+            print("[DEBUG] ChromeDriver traceback:")
+            print(traceback.format_exc())
+            if chromedriver_log_path:
+                try:
+                    with open(chromedriver_log_path, "r", encoding="utf-8", errors="replace") as log_file:
+                        print("[DEBUG] ChromeDriver log:")
+                        print(log_file.read())
+                except OSError as log_exc:
+                    print(f"[DEBUG] Could not read ChromeDriver log: {log_exc}")
             raise
+        finally:
+            if chromedriver_log_path:
+                try:
+                    os.remove(chromedriver_log_path)
+                except OSError:
+                    pass
 
         print(f"[*] Using Chrome user-data directory: {profile_dir}")
         return self.driver
