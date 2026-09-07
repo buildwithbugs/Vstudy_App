@@ -13,7 +13,7 @@ BASE_DIR = Path(__file__).resolve().parent
 VSTUDY_URL = os.getenv("VSTUDY_URL", "https://vstudy.saveetha.com/")
 VSTUDY_PROFILE_DIR = os.getenv(
     "VSTUDY_PROFILE_DIR",
-    str(BASE_DIR / "vstudy_chrome_profile"),
+    "/data/vstudy_chrome_profile",
 )
 
 # ─────────────────────────────────────────

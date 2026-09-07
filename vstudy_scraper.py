@@ -49,6 +49,8 @@ class VStudyScraper:
             options.add_argument("--no-sandbox")
             options.add_argument("--disable-dev-shm-usage")
             options.add_argument("--window-size=1920,1080")
+            options.add_argument("--disable-gpu")
+            options.add_argument("--remote-debugging-port=9222")
         options.add_experimental_option("excludeSwitches", ["enable-automation"])
         options.add_experimental_option("useAutomationExtension", False)
 
@@ -85,6 +87,24 @@ class VStudyScraper:
             return True
 
         return False
+
+    def _log_profile_page_failure(self, driver):
+        try:
+            page_text = driver.find_element(By.TAG_NAME, "body").text
+        except Exception:
+            page_text = driver.page_source or ""
+        normalized_text = page_text.lower()
+        current_url = driver.current_url
+        normalized_url = current_url.lower()
+        login_present = "login" in normalized_url or "login" in normalized_text
+        google_present = "google" in normalized_url or "google" in normalized_text
+        dashboard_present = "/dashboard" in normalized_url or "dashboard" in normalized_text
+        print(f"[DEBUG] Profile failure login present: {login_present}")
+        print(f"[DEBUG] Profile failure Google present: {google_present}")
+        print(f"[DEBUG] Profile failure dashboard present: {dashboard_present}")
+        print(f"[DEBUG] Profile failure URL: {current_url}")
+        print(f"[DEBUG] Profile failure title: {driver.title}")
+        print(f"[DEBUG] Profile failure page text: {page_text[:1000]}")
 
     def ensure_authenticated(self, driver=None):
         driver = driver or self.driver
@@ -132,6 +152,7 @@ class VStudyScraper:
         driver.get(PROFILE_URL)
 
         if self._is_authentication_required(driver):
+            self._log_profile_page_failure(driver)
             raise AuthenticationRequiredError(
                 "VStudy authentication is required before the profile page can be opened."
             )
@@ -153,6 +174,7 @@ class VStudyScraper:
         try:
             WebDriverWait(driver, self.wait_timeout).until(_profile_page_ready)
         except TimeoutException:
+            self._log_profile_page_failure(driver)
             print("[✗] Profile page unavailable")
             raise
 
