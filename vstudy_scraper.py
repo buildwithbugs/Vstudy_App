@@ -83,6 +83,53 @@ class VStudyScraper:
         options.add_experimental_option("useAutomationExtension", False)
         return options
 
+    def _cleanup_stale_profile_locks(self, profile_dir):
+        print("[DEBUG] Checking for active Chromium process using profile...")
+        proc_dir = "/proc"
+        process_check_complete = True
+        active_process_found = False
+
+        try:
+            process_ids = os.listdir(proc_dir)
+        except OSError:
+            process_check_complete = False
+            process_ids = []
+
+        for process_id in process_ids:
+            if not process_id.isdigit():
+                continue
+
+            try:
+                with open(os.path.join(proc_dir, process_id, "cmdline"), "rb") as process_file:
+                    command = process_file.read().replace(b"\x00", b" ").decode(errors="replace")
+            except (OSError, UnicodeError):
+                process_check_complete = False
+                continue
+
+            executable = os.path.basename(command.split(" ", 1)[0]).lower()
+            if executable in {"chromium", "chromium-browser", "google-chrome", "google-chrome-stable", "chrome"} and profile_dir in command:
+                active_process_found = True
+                break
+
+        if active_process_found:
+            print("[DEBUG] Active Chromium process found; keeping singleton locks")
+            return
+        if not process_check_complete:
+            print("[DEBUG] Could not complete active Chromium process check; keeping singleton locks")
+            return
+
+        print("[DEBUG] No active Chromium process found; cleaning stale singleton locks")
+        for filename in ("SingletonLock", "SingletonSocket", "SingletonCookie"):
+            lock_path = os.path.join(profile_dir, filename)
+            if not os.path.exists(lock_path):
+                print(f"[DEBUG] No stale lock found: {filename}")
+                continue
+            try:
+                os.remove(lock_path)
+                print(f"[DEBUG] Removed stale lock: {filename}")
+            except OSError as exc:
+                print(f"[DEBUG] Could not remove stale lock {filename}: {exc}")
+
     def _create_driver(self):
         profile_dir = os.path.abspath(VSTUDY_PROFILE_DIR)
         runtime_dir = os.path.abspath(CHROME_RUNTIME_DIR)
@@ -107,6 +154,7 @@ class VStudyScraper:
                 if chromedriver_binary
                 else None
             )
+            self._cleanup_stale_profile_locks(profile_dir)
             self.driver = webdriver.Chrome(service=service, options=options)
         except WebDriverException as exc:
             print("[✗] ChromeDriver failed to start Chromium with the persistent profile")
