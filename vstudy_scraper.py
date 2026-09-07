@@ -122,7 +122,7 @@ class VStudyScraper:
         print("[DEBUG] No active Chromium process found; cleaning stale singleton locks")
         for filename in ("SingletonLock", "SingletonSocket", "SingletonCookie"):
             lock_path = os.path.join(profile_dir, filename)
-            if not os.path.exists(lock_path):
+            if not os.path.lexists(lock_path):
                 print(f"[DEBUG] No stale lock found: {filename}")
                 continue
             try:
