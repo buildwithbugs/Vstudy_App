@@ -1,4 +1,5 @@
 import os
+import json
 import re
 import shutil
 import subprocess
@@ -130,6 +131,48 @@ class VStudyScraper:
             except OSError as exc:
                 print(f"[DEBUG] Could not remove stale lock {filename}: {exc}")
 
+    def _log_profile_startup_preflight(self, profile_dir, runtime_dir):
+        print("[DEBUG] Persistent Chrome profile startup preflight:")
+        print(f"[DEBUG] Profile directory exists: {os.path.isdir(profile_dir)}")
+        print(f"[DEBUG] Profile directory writable: {os.access(profile_dir, os.W_OK)}")
+
+        default_dir = os.path.join(profile_dir, "Default")
+        local_state_path = os.path.join(profile_dir, "Local State")
+        preferences_path = os.path.join(default_dir, "Preferences")
+        print(f"[DEBUG] Default profile directory exists: {os.path.isdir(default_dir)}")
+        print(f"[DEBUG] Local State exists: {os.path.isfile(local_state_path)}")
+        print(f"[DEBUG] Preferences exists: {os.path.isfile(preferences_path)}")
+
+        for filename in ("SingletonLock", "SingletonSocket", "SingletonCookie"):
+            lock_path = os.path.join(profile_dir, filename)
+            print(f"[DEBUG] {filename} exists: {os.path.lexists(lock_path)}")
+
+        for label, path in (
+            ("profile filesystem", profile_dir),
+            ("/tmp/chrome filesystem", runtime_dir),
+        ):
+            try:
+                available_bytes = shutil.disk_usage(path).free
+                print(f"[DEBUG] Available disk space for {label}: {available_bytes} bytes")
+            except OSError as exc:
+                print(f"[DEBUG] Available disk space for {label}: unavailable ({exc})")
+
+        for label, path in (
+            ("Local State", local_state_path),
+            ("Preferences", preferences_path),
+        ):
+            if not os.path.isfile(path):
+                continue
+            try:
+                if os.path.getsize(path) == 0:
+                    print(f"[DEBUG] Possible corruption indicator: {label} is empty")
+                    continue
+                with open(path, "r", encoding="utf-8") as profile_file:
+                    json.load(profile_file)
+                print(f"[DEBUG] {label} JSON is readable")
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                print(f"[DEBUG] Possible corruption indicator: {label} is not valid JSON ({exc})")
+
     def _create_driver(self):
         profile_dir = os.path.abspath(VSTUDY_PROFILE_DIR)
         runtime_dir = os.path.abspath(CHROME_RUNTIME_DIR)
@@ -163,6 +206,7 @@ class VStudyScraper:
                 else None
             )
             self._cleanup_stale_profile_locks(profile_dir)
+            self._log_profile_startup_preflight(profile_dir, runtime_dir)
             self.driver = webdriver.Chrome(service=service, options=options)
         except WebDriverException as exc:
             print("[✗] ChromeDriver failed to start Chromium with the persistent profile")
