@@ -83,6 +83,61 @@ class VStudyScraper:
         options.add_experimental_option("useAutomationExtension", False)
         return options
 
+    def _is_chromium_running(self):
+        try:
+            result = subprocess.run(
+                ["pgrep", "-f", "chromium"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                print(f"[DEBUG] pgrep found running chromium process(es): {result.stdout.strip()}")
+                return True
+            print("[DEBUG] pgrep found no running chromium processes")
+            return False
+        except (OSError, subprocess.SubprocessError) as exc:
+            print(f"[DEBUG] pgrep check failed, falling back to /proc scan: {exc}")
+
+        try:
+            for pid in os.listdir("/proc"):
+                if not pid.isdigit():
+                    continue
+                cmdline_path = f"/proc/{pid}/cmdline"
+                try:
+                    with open(cmdline_path, "rb") as fh:
+                        cmdline = fh.read().decode(errors="ignore")
+                except (OSError, IOError):
+                    continue
+                if "chromium" in cmdline.lower():
+                    print(f"[DEBUG] /proc scan found chromium process at pid {pid}: {cmdline!r}")
+                    return True
+            print("[DEBUG] /proc scan found no running chromium processes")
+            return False
+        except OSError as exc:
+            print(f"[DEBUG] /proc scan failed: {exc}")
+            return False
+
+    def _cleanup_stale_locks(self, profile_dir):
+        if self._is_chromium_running():
+            return
+
+        lock_filenames = ["SingletonLock", "SingletonSocket", "SingletonCookie"]
+        removed_any = False
+        for filename in lock_filenames:
+            lock_path = os.path.join(profile_dir, filename)
+            if os.path.exists(lock_path):
+                try:
+                    os.remove(lock_path)
+                    print(f"[STALE_LOCK] Removed: {filename}")
+                    removed_any = True
+                except OSError as exc:
+                    print(f"[STALE_LOCK] Failed to remove {filename}: {exc}")
+
+        if not removed_any:
+            print("[STALE_LOCK] No stale locks detected")
+
     def _create_driver(self):
         profile_dir = os.path.abspath(VSTUDY_PROFILE_DIR)
         runtime_dir = os.path.abspath(CHROME_RUNTIME_DIR)
@@ -93,6 +148,8 @@ class VStudyScraper:
             raise PermissionError(f"Chrome profile directory is not writable: {profile_dir}")
         if not os.access(runtime_dir, os.W_OK):
             raise PermissionError(f"Chrome runtime directory is not writable: {runtime_dir}")
+
+        self._cleanup_stale_locks(profile_dir)
 
         chromium_binary = next(
             (shutil.which(name) for name in ("chromium", "chromium-browser", "google-chrome") if shutil.which(name)),
