@@ -296,10 +296,6 @@ class VStudyScraper:
             print("[✗] VStudy unavailable or timed out")
             raise
 
-        if self._is_dashboard_visible(driver):
-            print("[✓] VStudy authenticated")
-            return True
-
         if self._is_authentication_required(driver):
             if UNATTENDED:
                 raise AuthenticationRequiredError(
@@ -314,7 +310,8 @@ class VStudyScraper:
             print("[✓] VStudy authenticated")
             return True
 
-        print("[✓] VStudy authenticated")
+        if self._is_dashboard_visible(driver):
+            print("[✓] VStudy authenticated")
         return True
 
     def open_profile_page(self, driver=None):
