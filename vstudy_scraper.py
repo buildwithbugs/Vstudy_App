@@ -83,7 +83,70 @@ class VStudyScraper:
         options.add_experimental_option("useAutomationExtension", False)
         return options
 
+    def _is_chromium_running(self):
+        # Prefer scanning /proc directly since utilities like pgrep/ps may not
+        # be installed in the minimal container image.
+        proc_dir = "/proc"
+        if os.path.isdir(proc_dir):
+            try:
+                for entry in os.listdir(proc_dir):
+                    if not entry.isdigit():
+                        continue
+                    cmdline_path = os.path.join(proc_dir, entry, "cmdline")
+                    try:
+                        with open(cmdline_path, "rb") as fh:
+                            cmdline = fh.read().replace(b"\x00", b" ").decode("utf-8", errors="ignore")
+                    except (OSError, IOError):
+                        continue
+                    if "chromium" in cmdline.lower() or "chrome" in cmdline.lower():
+                        return True
+                return False
+            except OSError as exc:
+                print(f"[DEBUG] Unable to scan /proc for Chromium processes: {exc}")
+
+        try:
+            result = subprocess.run(
+                ["pgrep", "-f", "chromium"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            return bool(result.stdout.strip())
+        except (OSError, subprocess.SubprocessError) as exc:
+            print(f"[DEBUG] Unable to check for running Chromium processes: {exc}")
+            # If we cannot reliably determine process state, err on the side of
+            # caution and treat Chromium as running so we do not touch lock files.
+            return True
+
+    def _cleanup_stale_locks(self):
+        profile_dir = os.path.abspath(VSTUDY_PROFILE_DIR)
+        lock_filenames = ("SingletonLock", "SingletonSocket", "SingletonCookie")
+        lock_paths = [os.path.join(profile_dir, name) for name in lock_filenames]
+
+        existing_locks = [path for path in lock_paths if os.path.exists(path) or os.path.islink(path)]
+        if not existing_locks:
+            print("[*] No stale Chrome singleton lock files found")
+            return
+
+        print(f"[*] Found {len(existing_locks)} Chrome singleton lock file(s): {existing_locks}")
+
+        if self._is_chromium_running():
+            print("[!] Chromium process is currently running; leaving lock files in place")
+            return
+
+        for path in existing_locks:
+            try:
+                os.remove(path)
+                print(f"[✓] Removed stale lock file: {path}")
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                print(f"[DEBUG] Failed to remove stale lock file {path}: {exc}")
+
     def _create_driver(self):
+        self._cleanup_stale_locks()
+
         profile_dir = os.path.abspath(VSTUDY_PROFILE_DIR)
         runtime_dir = os.path.abspath(CHROME_RUNTIME_DIR)
         os.makedirs(profile_dir, exist_ok=True)
