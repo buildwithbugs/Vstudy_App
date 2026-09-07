@@ -9,7 +9,14 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 
-from config import HEADLESS, SAVE_DEBUG_ARTIFACTS, UNATTENDED, VSTUDY_URL, VSTUDY_PROFILE_DIR
+from config import (
+    CHROME_RUNTIME_DIR,
+    HEADLESS,
+    SAVE_DEBUG_ARTIFACTS,
+    UNATTENDED,
+    VSTUDY_URL,
+    VSTUDY_PROFILE_DIR,
+)
 
 DASHBOARD_URL = "https://vstudy.saveetha.com/dashboard"
 PROFILE_URL = "https://vstudy.saveetha.com/dashboard/profile"
@@ -27,10 +34,18 @@ class VStudyScraper:
 
     def _create_driver(self):
         profile_dir = os.path.abspath(VSTUDY_PROFILE_DIR)
+        runtime_dir = os.path.abspath(CHROME_RUNTIME_DIR)
         os.makedirs(profile_dir, exist_ok=True)
+        os.makedirs(runtime_dir, exist_ok=True)
+
+        if not os.access(profile_dir, os.W_OK):
+            raise PermissionError(f"Chrome profile directory is not writable: {profile_dir}")
+        if not os.access(runtime_dir, os.W_OK):
+            raise PermissionError(f"Chrome runtime directory is not writable: {runtime_dir}")
 
         options = Options()
         options.add_argument(f"--user-data-dir={profile_dir}")
+        options.add_argument(f"--disk-cache-dir={runtime_dir}")
         options.add_argument("--profile-directory=Default")
         options.add_argument("--start-maximized")
         options.add_argument("--no-first-run")

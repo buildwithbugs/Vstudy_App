@@ -15,6 +15,7 @@ VSTUDY_PROFILE_DIR = os.getenv(
     "VSTUDY_PROFILE_DIR",
     "/data/vstudy_chrome_profile",
 )
+CHROME_RUNTIME_DIR = os.getenv("CHROME_RUNTIME_DIR", "/tmp/chrome")
 
 # ─────────────────────────────────────────
 #  TELEGRAM BOT SETTINGS (from environment)
